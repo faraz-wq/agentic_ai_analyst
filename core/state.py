@@ -5,7 +5,6 @@ from typing import Dict, List, Optional, Any
 from pydantic import BaseModel, Field
 import pandas as pd
 
-
 class AgentState(BaseModel):
     """
     Shared state object that gets passed between agents in the orchestration workflow.
@@ -20,7 +19,13 @@ class AgentState(BaseModel):
     
     # Data storage
     raw_data: Optional[pd.DataFrame] = Field(default=None, description="The loaded and standardized DataFrame")
+    cleaned_data: Optional[pd.DataFrame] = Field(default=None, description="The cleaned and transformed DataFrame")
     data_profile: Optional[Dict[str, Any]] = Field(default=None, description="Structured summary of data profile")
+    
+    # Cleaning and transformation results
+    cleaning_report: Optional[Dict[str, Any]] = Field(default=None, description="Structured report of all cleaning actions")
+    issues_detected: Optional[List[Dict[str, Any]]] = Field(default=None, description="List of identified data quality problems")
+    actions_performed: Optional[List[Dict[str, Any]]] = Field(default=None, description="List of cleaning actions taken")
     
     # Workflow tracking
     logs: List[str] = Field(default_factory=list, description="Human-readable log messages")
@@ -34,4 +39,3 @@ class AgentState(BaseModel):
     
     class Config:
         arbitrary_types_allowed = True  # Allows pandas DataFrame in Pydantic model
-

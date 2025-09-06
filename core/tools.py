@@ -23,6 +23,8 @@ def read_dataframe(file_path: str) -> str:
     Returns:
         String message indicating success or failure
     """
+
+    print(f"Attempting to read file: {file_path}")  # Debug statement
     try:
         if not os.path.exists(file_path):
             return f"ERROR: File not found at {file_path}"
@@ -67,6 +69,8 @@ def standardize_dataframe() -> str:
     Returns:
         String message indicating success or failure
     """
+    
+    print(f"Attempting to standardize DataFrame")  # Debug statement
     try:
         if '_loaded_dataframe' not in globals():
             return "ERROR: No DataFrame loaded. Please load data first."
@@ -79,6 +83,7 @@ def standardize_dataframe() -> str:
         # Remove any duplicate column names by adding suffix
         df.columns = pd.io.common.dedup_names(df.columns, is_potential_multiindex=False)
         
+        print(f"Standardized columns: {list(df.columns)}")  # Debug: print standardized column names
         # Store the standardized DataFrame
         globals()['_loaded_dataframe'] = df
         
@@ -99,11 +104,16 @@ def generate_profile(output_path: str) -> str:
     Returns:
         JSON string containing the profile summary or error message
     """
+    print(f"Attempting to generate profile report at: {output_path}")  # Debug statement
     try:
         if '_loaded_dataframe' not in globals():
             return json.dumps({"error": "No DataFrame loaded. Please load data first."})
         
         df = globals()['_loaded_dataframe']
+        
+        # Fix: Convert nullable dtypes to standard dtypes
+        df = df.convert_dtypes()
+        df = df.astype({col: 'float64' for col in df.select_dtypes(include=['Float64', 'Float32']).columns})
         
         # Generate the profile report
         profile = ProfileReport(
@@ -129,7 +139,7 @@ def generate_profile(output_path: str) -> str:
                 "total_missing_cells": int(df.isnull().sum().sum()),
                 "missing_percentage": round((df.isnull().sum().sum() / (df.shape[0] * df.shape[1])) * 100, 2)
             },
-            "data_types": df.dtypes.value_counts().to_dict()
+            "data_types": {str(k): v for k, v in df.dtypes.value_counts().to_dict().items()}
         }
         
         # Add column-specific information
@@ -141,7 +151,6 @@ def generate_profile(output_path: str) -> str:
                 "null_percentage": round((df[col].isnull().sum() / len(df)) * 100, 2)
             }
             
-            # Add type-specific statistics
             if df[col].dtype in ['int64', 'float64', 'int32', 'float32']:
                 col_info.update({
                     "mean": float(df[col].mean()) if not df[col].isnull().all() else None,
@@ -157,7 +166,6 @@ def generate_profile(output_path: str) -> str:
                 
             profile_summary["columns"][col] = col_info
         
-        # Store profile summary globally
         globals()['_profile_summary'] = profile_summary
         
         return json.dumps({
@@ -168,7 +176,6 @@ def generate_profile(output_path: str) -> str:
         
     except Exception as e:
         return json.dumps({"error": f"Failed to generate profile: {str(e)}"})
-
 
 @tool
 def save_standardized_data(output_path: str) -> str:
@@ -181,6 +188,8 @@ def save_standardized_data(output_path: str) -> str:
     Returns:
         String message indicating success or failure
     """
+    
+    print(f"Attempting to save standardized DataFrame to: {output_path}")  # Debug statement
     try:
         if '_loaded_dataframe' not in globals():
             return "ERROR: No DataFrame loaded. Please load and standardize data first."
@@ -193,8 +202,446 @@ def save_standardized_data(output_path: str) -> str:
         # Save to CSV
         df.to_csv(output_path, index=False)
         
+        print(globals()['_loaded_dataframe'].head())
         return f"SUCCESS: Saved standardized data to {output_path}"
         
     except Exception as e:
         return f"ERROR: Failed to save data: {str(e)}"
+
+@tool
+def analyze_data_quality(profile_json: str) -> str:
+    """
+    Analyze the data profile to identify and prioritize data quality issues.
+    
+    Args:
+        profile_json: JSON string containing the data profile summary
+        
+    Returns:
+        JSON string containing prioritized list of issues found
+    """
+    
+    print(f"Attempting to analyze data quality")  # Debug statement
+    try:
+        profile = json.loads(profile_json)
+        issues = []
+        
+        # Check for missing values
+        for col_name, col_info in profile.get("columns", {}).items():
+            null_pct = col_info.get("null_percentage", 0)
+            
+            if null_pct > 50:
+                issues.append({
+                    "issue": "high_missing_values",
+                    "column": col_name,
+                    "severity": "high",
+                    "details": f"{null_pct}% null values",
+                    "priority": 1
+                })
+            elif null_pct > 10:
+                issues.append({
+                    "issue": "moderate_missing_values",
+                    "column": col_name,
+                    "severity": "medium",
+                    "details": f"{null_pct}% null values",
+                    "priority": 2
+                })
+        
+        # Check for data type issues (objects that might be numbers/dates)
+        for col_name, col_info in profile.get("columns", {}).items():
+            if col_info.get("dtype") == "object":
+                # Check if it might be a numeric column stored as string
+                if col_info.get("unique_count", 0) > 10:  # Likely not categorical
+                    issues.append({
+                        "issue": "potential_numeric_as_string",
+                        "column": col_name,
+                        "severity": "medium",
+                        "details": f"Object column with {col_info.get('unique_count')} unique values",
+                        "priority": 3
+                    })
+        
+        # Check for potential duplicates (this is a heuristic)
+        dataset_info = profile.get("dataset_info", {})
+        row_count = dataset_info.get("row_count", 0)
+        total_columns = dataset_info.get("column_count", 1)
+        
+        # If we have many rows, duplicates are likely
+        if row_count > 1000:
+            issues.append({
+                "issue": "potential_duplicates",
+                "column": "all",
+                "severity": "low",
+                "details": f"Large dataset ({row_count} rows) may contain duplicates",
+                "priority": 4
+            })
+        
+        # Sort by priority
+        issues.sort(key=lambda x: x["priority"])
+        
+        # Store issues globally for access by other tools
+        globals()['_detected_issues'] = issues
+        
+        return json.dumps({
+            "status": "SUCCESS",
+            "issues_found": len(issues),
+            "issues": issues
+        })
+        
+    except Exception as e:
+        return json.dumps({"error": f"Failed to analyze data quality: {str(e)}"})
+
+
+@tool
+def handle_missing_values(strategy: str, columns: str) -> str:
+    """
+    Handle missing values in specified columns using the given strategy.
+    
+    Args:
+        strategy: Strategy to use ('drop', 'mean', 'median', 'mode', 'fillna_zero')
+        columns: Comma-separated list of column names, or 'all' for all columns
+        
+    Returns:
+        String message indicating success or failure
+    """
+    
+    print(f"Attempting to handle missing values using strategy: {strategy} on columns: {columns}")  # Debug statement
+    try:
+        if '_working_dataframe' not in globals():
+            return "ERROR: No working DataFrame available. Please load data first."
+        
+        df = globals()['_working_dataframe'].copy()
+        actions = []
+        
+        # Parse columns
+        if columns.lower() == 'all':
+            target_columns = df.columns.tolist()
+        else:
+            target_columns = [col.strip() for col in columns.split(',')]
+        
+        for col in target_columns:
+            if col not in df.columns:
+                continue
+                
+            missing_count = df[col].isnull().sum()
+            if missing_count == 0:
+                continue
+            
+            if strategy == 'drop':
+                df = df.dropna(subset=[col])
+                actions.append({
+                    "action": "drop_missing",
+                    "column": col,
+                    "rows_removed": missing_count
+                })
+            elif strategy == 'mean' and df[col].dtype in ['int64', 'float64', 'int32', 'float32']:
+                fill_value = df[col].mean()
+                df[col].fillna(fill_value, inplace=True)
+                actions.append({
+                    "action": "impute_missing",
+                    "column": col,
+                    "strategy": "mean",
+                    "value": fill_value
+                })
+            elif strategy == 'median' and df[col].dtype in ['int64', 'float64', 'int32', 'float32']:
+                fill_value = df[col].median()
+                df[col].fillna(fill_value, inplace=True)
+                actions.append({
+                    "action": "impute_missing",
+                    "column": col,
+                    "strategy": "median",
+                    "value": fill_value
+                })
+            elif strategy == 'mode':
+                if len(df[col].mode()) > 0:
+                    fill_value = df[col].mode().iloc[0]
+                    df[col].fillna(fill_value, inplace=True)
+                    actions.append({
+                        "action": "impute_missing",
+                        "column": col,
+                        "strategy": "mode",
+                        "value": fill_value
+                    })
+            elif strategy == 'fillna_zero':
+                df[col].fillna(0, inplace=True)
+                actions.append({
+                    "action": "impute_missing",
+                    "column": col,
+                    "strategy": "zero",
+                    "value": 0
+                })
+        
+        # Update working dataframe
+        globals()['_working_dataframe'] = df
+        
+        # Store actions
+        if '_cleaning_actions' not in globals():
+            globals()['_cleaning_actions'] = []
+        globals()['_cleaning_actions'].extend(actions)
+        
+        return f"SUCCESS: Applied {strategy} strategy to {len(target_columns)} columns. Actions: {len(actions)}"
+        
+    except Exception as e:
+        return f"ERROR: Failed to handle missing values: {str(e)}"
+
+
+@tool
+def correct_data_types(type_corrections: str) -> str:
+    """
+    Convert columns to correct data types based on provided mapping.
+    
+    Args:
+        type_corrections: JSON string with column->type mapping, e.g. '{"col1": "int64", "col2": "datetime"}'
+        
+    Returns:
+        String message indicating success or failure
+    """
+    try:
+        if '_working_dataframe' not in globals():
+            return "ERROR: No working DataFrame available. Please load data first."
+        
+        df = globals()['_working_dataframe'].copy()
+        type_map = json.loads(type_corrections)
+        actions = []
+        
+        for col, target_type in type_map.items():
+            if col not in df.columns:
+                continue
+            
+            original_type = str(df[col].dtype)
+            
+            try:
+                if target_type == 'datetime':
+                    df[col] = pd.to_datetime(df[col], errors='coerce')
+                elif target_type == 'numeric':
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
+                elif target_type in ['int64', 'int32']:
+                    df[col] = pd.to_numeric(df[col], errors='coerce').astype(target_type)
+                elif target_type in ['float64', 'float32']:
+                    df[col] = pd.to_numeric(df[col], errors='coerce').astype(target_type)
+                elif target_type == 'category':
+                    df[col] = df[col].astype('category')
+                else:
+                    df[col] = df[col].astype(target_type)
+                
+                actions.append({
+                    "action": "convert_dtype",
+                    "column": col,
+                    "from": original_type,
+                    "to": str(df[col].dtype)
+                })
+                
+            except Exception as e:
+                actions.append({
+                    "action": "convert_dtype_failed",
+                    "column": col,
+                    "error": str(e)
+                })
+        
+        # Update working dataframe
+        globals()['_working_dataframe'] = df
+        
+        # Store actions
+        if '_cleaning_actions' not in globals():
+            globals()['_cleaning_actions'] = []
+        globals()['_cleaning_actions'].extend(actions)
+        
+        return f"SUCCESS: Attempted type conversions for {len(type_map)} columns. Successful: {len([a for a in actions if 'failed' not in a['action']])}"
+        
+    except Exception as e:
+        return f"ERROR: Failed to correct data types: {str(e)}"
+
+
+@tool
+def remove_duplicates() -> str:
+    """
+    Remove duplicate rows from the DataFrame.
+    
+    Returns:
+        String message indicating success or failure
+    """
+    try:
+        if '_working_dataframe' not in globals():
+            return "ERROR: No working DataFrame available. Please load data first."
+        
+        df = globals()['_working_dataframe'].copy()
+        original_count = len(df)
+        
+        # Remove duplicates
+        df = df.drop_duplicates()
+        duplicates_removed = original_count - len(df)
+        
+        # Update working dataframe
+        globals()['_working_dataframe'] = df
+        
+        # Store action
+        action = {
+            "action": "remove_duplicates",
+            "column": "all",
+            "duplicates_removed": duplicates_removed,
+            "final_row_count": len(df)
+        }
+        
+        if '_cleaning_actions' not in globals():
+            globals()['_cleaning_actions'] = []
+        globals()['_cleaning_actions'].append(action)
+        
+        return f"SUCCESS: Removed {duplicates_removed} duplicate rows. Final count: {len(df)} rows"
+        
+    except Exception as e:
+        return f"ERROR: Failed to remove duplicates: {str(e)}"
+
+
+@tool
+def standardize_categorical_values(column: str, standardization_rules: str) -> str:
+    """
+    Standardize categorical values in a column based on provided rules.
+    
+    Args:
+        column: Name of the column to standardize
+        standardization_rules: JSON string with mapping, e.g. '{"USA": "United States", "U.S.A": "United States"}'
+        
+    Returns:
+        String message indicating success or failure
+    """
+    try:
+        if '_working_dataframe' not in globals():
+            return "ERROR: No working DataFrame available. Please load data first."
+        
+        df = globals()['_working_dataframe'].copy()
+        
+        if column not in df.columns:
+            return f"ERROR: Column '{column}' not found in DataFrame"
+        
+        rules = json.loads(standardization_rules)
+        
+        # Apply standardization rules
+        df[column] = df[column].replace(rules)
+        
+        # Update working dataframe
+        globals()['_working_dataframe'] = df
+        
+        # Store action
+        action = {
+            "action": "standardize_categorical",
+            "column": column,
+            "rules_applied": len(rules),
+            "unique_values_after": df[column].nunique()
+        }
+        
+        if '_cleaning_actions' not in globals():
+            globals()['_cleaning_actions'] = []
+        globals()['_cleaning_actions'].append(action)
+        
+        return f"SUCCESS: Applied {len(rules)} standardization rules to column '{column}'"
+        
+    except Exception as e:
+        return f"ERROR: Failed to standardize categorical values: {str(e)}"
+
+
+@tool
+def validate_cleaning_results() -> str:
+    """
+    Compare data before and after cleaning to validate improvements.
+    
+    Returns:
+        JSON string containing validation metrics
+    """
+    try:
+        if '_working_dataframe' not in globals():
+            return json.dumps({"error": "No working DataFrame available"})
+        
+        # Get original data from raw_data or loaded dataframe
+        original_df = None
+        if '_original_dataframe' in globals():
+            original_df = globals()['_original_dataframe']
+        else:
+            return json.dumps({"error": "No original DataFrame available for comparison"})
+        
+        cleaned_df = globals()['_working_dataframe']
+        
+        # Calculate metrics
+        validation_metrics = {
+            "row_count_change": {
+                "before": len(original_df),
+                "after": len(cleaned_df),
+                "change": len(cleaned_df) - len(original_df)
+            },
+            "missing_values": {
+                "before": int(original_df.isnull().sum().sum()),
+                "after": int(cleaned_df.isnull().sum().sum()),
+                "reduction": int(original_df.isnull().sum().sum()) - int(cleaned_df.isnull().sum().sum())
+            },
+            "data_types": {
+                "before": original_df.dtypes.value_counts().to_dict(),
+                "after": cleaned_df.dtypes.value_counts().to_dict()
+            }
+        }
+        
+        # Store validation results
+        globals()['_validation_results'] = validation_metrics
+        
+        return json.dumps({
+            "status": "SUCCESS",
+            "validation_metrics": validation_metrics
+        })
+        
+    except Exception as e:
+        return json.dumps({"error": f"Failed to validate cleaning results: {str(e)}"})
+
+
+@tool
+def initialize_cleaning_dataframe() -> str:
+    """
+    Initialize the working dataframe for cleaning operations from the loaded raw data.
+    
+    Returns:
+        String message indicating success or failure
+    """
+    try:
+        # Check if we have raw data loaded (from ingestion agent)
+        if '_loaded_dataframe' not in globals():
+            return "ERROR: No raw data available. Please run ingestion first."
+        
+        # Copy the raw data to working dataframe
+        if '_loaded_dataframe' not in globals():
+            return "ERROR: No raw DataFrame loaded. Please load data first."
+        raw_df = globals()['_loaded_dataframe']
+        globals()['_working_dataframe'] = raw_df.copy()
+        globals()['_original_dataframe'] = raw_df.copy()  # Keep original for comparison
+        
+        # Initialize cleaning actions list
+        globals()['_cleaning_actions'] = []
+        
+        return f"SUCCESS: Initialized cleaning dataframe with {raw_df.shape[0]} rows and {raw_df.shape[1]} columns"
+        
+    except Exception as e:
+        return f"ERROR: Failed to initialize cleaning dataframe: {str(e)}"
+
+
+@tool
+def save_cleaned_data(output_path: str) -> str:
+    """
+    Save the cleaned DataFrame to a CSV file.
+    
+    Args:
+        output_path: Path where to save the cleaned CSV file
+        
+    Returns:
+        String message indicating success or failure
+    """
+    try:
+        if '_working_dataframe' not in globals():
+            return "ERROR: No cleaned DataFrame available. Please perform cleaning operations first."
+        
+        df = globals()['_working_dataframe']
+        
+        # Ensure output directory exists
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        
+        # Save to CSV
+        df.to_csv(output_path, index=False)
+        
+        return f"SUCCESS: Saved cleaned data to {output_path}. Shape: {df.shape}"
+        
+    except Exception as e:
+        return f"ERROR: Failed to save cleaned data: {str(e)}"
 

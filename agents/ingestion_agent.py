@@ -27,9 +27,9 @@ def create_ingestion_agent() -> AgentExecutor:
     
     # Initialize the LLM
     llm = ChatOpenAI(
-        base_url="https://openrouter.ai/api/v1",
+        base_url="https://api.cerebras.ai/v1",
         api_key=os.getenv("OPENROUTER_API_KEY"),
-        model="qwen/qwen3-coder:free",
+        model="qwen-3-235b-a22b-instruct-2507",
         temperature=0.1,  # Low temperature for consistent, factual responses
         max_tokens=2000
     )
@@ -96,16 +96,9 @@ def create_ingestion_agent() -> AgentExecutor:
     
     return agent_executor
 
-
 def run_ingestion_agent(state: AgentState) -> Dict[str, Any]:
     """
     Execute the Ingestion & Profiling Agent workflow.
-    
-    This function orchestrates the complete ingestion process:
-    1. Validates input parameters
-    2. Invokes the agent to process the data
-    3. Updates the state with results
-    4. Handles errors gracefully
     
     Args:
         state: The current AgentState containing input parameters
@@ -116,12 +109,12 @@ def run_ingestion_agent(state: AgentState) -> Dict[str, Any]:
     
     # Convert state to dict for easier manipulation
     updated_state = state.dict()
+    updated_state['logs'] = updated_state.get('logs', [])
     
     try:
         # Validate inputs
         if not state.input_file_path:
             raise ValueError("input_file_path is required but not provided")
-        
         if not state.output_dir:
             raise ValueError("output_dir is required but not provided")
         
@@ -152,25 +145,48 @@ def run_ingestion_agent(state: AgentState) -> Dict[str, Any]:
         # Execute the agent
         result = agent_executor.invoke(agent_input)
         
+        # Debug: Print the full result from the agent
+        print('AgentExecutor result:', result)
+        
         # Extract the agent's response
         agent_response = result.get('output', '')
-        updated_state['logs'].append(f"Ingestion Agent: {agent_response}")
+        updated_state['logs'].append(f"Ingestion Agent Response: {agent_response}")
         
-        # Get the loaded DataFrame and profile summary from global variables
-        if '_loaded_dataframe' in globals():
-            updated_state['raw_data'] = globals()['_loaded_dataframe']
-            updated_state['logs'].append(f"Successfully loaded DataFrame with shape {globals()['_loaded_dataframe'].shape}")
+        # Extract profile summary from intermediate steps
+        profile_summary = None
+        for step in result.get('intermediate_steps', []):
+            action, output = step
+            updated_state['logs'].append(f"Tool {action.tool}: {output}")
+            if action.tool == 'generate_profile':
+                try:
+                    profile_data = json.loads(output).get('summary')
+                    if profile_data:
+                        profile_summary = profile_data
+                        updated_state['data_profile'] = profile_summary
+                        updated_state['logs'].append("Successfully extracted profile summary")
+                except json.JSONDecodeError:
+                    updated_state['logs'].append(f"Warning: Could not parse profile summary from {output}")
         
-        if '_profile_summary' in globals():
-            profile_data = globals()['_profile_summary']
-            updated_state['data_profile'] = profile_data
-            updated_state['logs'].append("Successfully generated data profile summary")
+        # Since _loaded_dataframe is not reliably accessible via globals(),
+        # reload the standardized DataFrame from the saved raw_data.csv
+        raw_data_path = os.path.join(state.output_dir, 'raw_data.csv')
+        if os.path.exists(raw_data_path):
+            import pandas as pd
+            updated_state['raw_data'] = pd.read_csv(raw_data_path)
+            updated_state['logs'].append(f"Loaded standardized DataFrame from {raw_data_path} with shape {updated_state['raw_data'].shape}")
+            # Debug: Print DataFrame head
+            print("DataFrame head:\n", updated_state['raw_data'].head())
+        else:
+            updated_state['logs'].append(f"Warning: Standardized data file {raw_data_path} not found")
         
-        # Mark ingestion as complete
-        updated_state['ingestion_complete'] = True
-        updated_state['logs'].append("Ingestion agent completed successfully")
+        # Mark ingestion as complete if profile and data are available
+        updated_state['ingestion_complete'] = bool(updated_state.get('raw_data') is not None and profile_summary is not None)
+        if updated_state['ingestion_complete']:
+            updated_state['logs'].append("Ingestion agent completed successfully")
+        else:
+            updated_state['logs'].append("Ingestion agent partially completed due to missing data or profile")
         
-        # Clean up global variables
+        # Clean up global variables (if they exist)
         if '_loaded_dataframe' in globals():
             del globals()['_loaded_dataframe']
         if '_profile_summary' in globals():
@@ -183,4 +199,3 @@ def run_ingestion_agent(state: AgentState) -> Dict[str, Any]:
         updated_state['ingestion_complete'] = False
     
     return updated_state
-
