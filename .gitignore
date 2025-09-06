@@ -1,2 +1,7 @@
 venv/
 *.log
+.env
+*.pyc
+*.csv
+output/*.html
+output/*.csv
