@@ -558,6 +558,12 @@ def validate_cleaning_results() -> str:
         
         cleaned_df = globals()['_working_dataframe']
         
+        # Convert nullable dtypes to standard dtypes to avoid serialization issues
+        original_df = original_df.convert_dtypes()
+        original_df = original_df.astype({col: 'float64' for col in original_df.select_dtypes(include=['Float64', 'Float32']).columns})
+        cleaned_df = cleaned_df.convert_dtypes()
+        cleaned_df = cleaned_df.astype({col: 'float64' for col in cleaned_df.select_dtypes(include=['Float64', 'Float32']).columns})
+        
         # Calculate metrics
         validation_metrics = {
             "row_count_change": {
@@ -571,8 +577,8 @@ def validate_cleaning_results() -> str:
                 "reduction": int(original_df.isnull().sum().sum()) - int(cleaned_df.isnull().sum().sum())
             },
             "data_types": {
-                "before": original_df.dtypes.value_counts().to_dict(),
-                "after": cleaned_df.dtypes.value_counts().to_dict()
+                "before": {str(k): v for k, v in original_df.dtypes.value_counts().to_dict().items()},
+                "after": {str(k): v for k, v in cleaned_df.dtypes.value_counts().to_dict().items()}
             }
         }
         
@@ -586,7 +592,6 @@ def validate_cleaning_results() -> str:
         
     except Exception as e:
         return json.dumps({"error": f"Failed to validate cleaning results: {str(e)}"})
-
 
 @tool
 def initialize_cleaning_dataframe() -> str:
