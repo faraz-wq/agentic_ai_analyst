@@ -1,5 +1,9 @@
 import os
 import json
+import time
+
+
+import pandas as pd
 from typing import Dict, Any
 from langchain.agents import AgentExecutor, create_openai_tools_agent
 from langchain_openai import ChatOpenAI
@@ -145,16 +149,9 @@ def create_cleaning_agent() -> AgentExecutor:
 
     return agent_executor
 
-
 def run_cleaning_agent(state: AgentState) -> Dict[str, Any]:
     """
     Execute the Data Cleaning & Transformation Agent workflow.
-
-    This function orchestrates the complete cleaning process:
-    1. Validates prerequisite data
-    2. Invokes the cleaning agent
-    3. Updates the state with results
-    4. Saves outputs and generates reports
 
     Args:
         state: The current AgentState containing data from ingestion
@@ -162,31 +159,25 @@ def run_cleaning_agent(state: AgentState) -> Dict[str, Any]:
     Returns:
         Dict containing the updated state information
     """
-
-    # Convert state to dict for easier manipulation
     updated_state = state.dict()
+    updated_state['logs'] = updated_state.get('logs', [])
 
     try:
         # Validate prerequisites
         if not state.ingestion_complete:
-            raise ValueError(
-                "Ingestion must be completed before cleaning. Please run ingestion agent first."
-            )
-
+            raise ValueError("Ingestion must be completed before cleaning.")
         if state.raw_data is None:
-            raise ValueError(
-                "No raw data available. Please ensure ingestion completed successfully."
-            )
-
+            raise ValueError("No raw data available.")
         if state.data_profile is None:
-            raise ValueError(
-                "No data profile available. Please ensure ingestion completed successfully."
-            )
+            raise ValueError("No data profile available.")
 
         # Ensure output directory exists
-        os.makedirs(state.output_dir, exist_ok=True)
+        output_dir = os.path.abspath(state.output_dir)
+        os.makedirs(output_dir, exist_ok=True)
+        updated_state["logs"].append(f"Output directory: {output_dir}")
+        updated_state["logs"].append(f"Current working directory: {os.getcwd()}")
 
-        # Store raw data globally for the cleaning tools to access
+        # Store raw data globally for the cleaning tools
         globals()["_loaded_dataframe"] = state.raw_data.copy()
 
         # Create agent
@@ -201,7 +192,7 @@ def run_cleaning_agent(state: AgentState) -> Dict[str, Any]:
             
             CONTEXT:
             - Dataset shape: {state.raw_data.shape}
-            - Output directory: {state.output_dir}
+            - Output directory: {output_dir}
             - Raw data is loaded and ready for processing
             
             DATA PROFILE SUMMARY:
@@ -222,50 +213,67 @@ def run_cleaning_agent(state: AgentState) -> Dict[str, Any]:
         # Execute the agent
         result = agent_executor.invoke(agent_input)
 
-        # Extract the agent's response
-        agent_response = result.get("output", "")
-        updated_state["logs"].append(f"Cleaning Agent: {agent_response}")
+        # Log the agent's output
+        updated_state["logs"].append(f"Cleaning Agent output: {result.get('output', '')}")
 
-        # Get results from global variables set by tools
-        if "_working_dataframe" in globals():
-            updated_state["cleaned_data"] = globals()["_working_dataframe"]
-            updated_state["logs"].append(
-                f"Successfully cleaned data. New shape: {globals()['_working_dataframe'].shape}"
-            )
+        # Extract validation metrics from intermediate steps
+        validation_metrics = {}
+        for step in result.get("intermediate_steps", []):
+            action, output = step
+            updated_state["logs"].append(f"Tool {action.tool}: {output}")
+            try:
+                output_dict = json.loads(output)
+                if action.tool == "validate_cleaning_results" and output_dict.get("status") == "SUCCESS":
+                    validation_metrics = output_dict.get("validation_metrics", {})
+                if output_dict.get("status") != "SUCCESS":
+                    updated_state["logs"].append(f"Error in {action.tool}: {output_dict.get('error')}")
+            except json.JSONDecodeError:
+                updated_state["logs"].append(f"Warning: Could not parse output from {action.tool}: {output}")
 
-        if "_detected_issues" in globals():
-            updated_state["issues_detected"] = globals()["_detected_issues"]
-            updated_state["logs"].append(
-                f"Detected {len(globals()['_detected_issues'])} data quality issues"
-            )
+        # Extract issues and actions from globals (if available)
+        updated_state["issues_detected"] = globals().get("_detected_issues", [])
+        updated_state["logs"].append(f"Detected {len(updated_state['issues_detected'])} data quality issues")
 
-        if "_cleaning_actions" in globals():
-            updated_state["actions_performed"] = globals()["_cleaning_actions"]
-            updated_state["logs"].append(
-                f"Performed {len(globals()['_cleaning_actions'])} cleaning actions"
-            )
+        updated_state["actions_performed"] = globals().get("_cleaning_actions", [])
+        updated_state["logs"].append(f"Performed {len(updated_state['actions_performed'])} cleaning actions")
 
-        if "_validation_results" in globals():
-            validation_metrics = globals()["_validation_results"]
+        # Log validation metrics status
+        if validation_metrics:
+            updated_state["logs"].append("Successfully extracted validation metrics")
         else:
-            validation_metrics = {}
+            updated_state["logs"].append("Warning: Validation metrics not found in tool output or globals")
+
+        # Load cleaned DataFrame from saved file with retry logic
+        cleaned_data_path = os.path.join(output_dir, "cleaned_data.csv")
+        updated_state["logs"].append(f"Checking for cleaned data file at: {cleaned_data_path}")
+
+        max_retries = 3
+        for attempt in range(max_retries):
+            time.sleep(0.5)  # Wait for file system sync
+            if os.path.exists(cleaned_data_path):
+                try:
+                    updated_state["cleaned_data"] = pd.read_csv(cleaned_data_path)
+                    updated_state["logs"].append(f"Loaded cleaned DataFrame from {cleaned_data_path} with shape {updated_state['cleaned_data'].shape}")
+                    break
+                except Exception as e:
+                    updated_state["logs"].append(f"Error loading {cleaned_data_path}: {str(e)}")
+            else:
+                updated_state["logs"].append(f"File not found on attempt {attempt + 1}: {cleaned_data_path}")
+            if attempt == max_retries - 1:
+                updated_state["cleaned_data"] = None
+                updated_state["logs"].append(f"Error: Cleaned data file {cleaned_data_path} not found after {max_retries} attempts")
+                raise ValueError(f"Cleaned data file {cleaned_data_path} not found after {max_retries} attempts")
 
         # Create comprehensive cleaning report
         cleaning_report = {
             "summary": {
-                "issues_detected": len(updated_state.get("issues_detected", [])),
-                "actions_performed": len(updated_state.get("actions_performed", [])),
-                "original_shape": (
-                    state.raw_data.shape if state.raw_data is not None else [0, 0]
-                ),
-                "cleaned_shape": (
-                    updated_state["cleaned_data"].shape
-                    if updated_state.get("cleaned_data") is not None
-                    else [0, 0]
-                ),
+                "issues_detected": len(updated_state["issues_detected"]),
+                "actions_performed": len(updated_state["actions_performed"]),
+                "original_shape": state.raw_data.shape if state.raw_data is not None else [0, 0],
+                "cleaned_shape": updated_state["cleaned_data"].shape if updated_state["cleaned_data"] is not None else [0, 0],
             },
-            "issues_detected": updated_state.get("issues_detected", []),
-            "actions_performed": updated_state.get("actions_performed", []),
+            "issues_detected": updated_state["issues_detected"],
+            "actions_performed": updated_state["actions_performed"],
             "validation_metrics": validation_metrics,
             "timestamp": pd.Timestamp.now().isoformat(),
         }
@@ -273,17 +281,17 @@ def run_cleaning_agent(state: AgentState) -> Dict[str, Any]:
         updated_state["cleaning_report"] = cleaning_report
 
         # Generate and save markdown report
-        report_path = os.path.join(state.output_dir, "cleaning_report.md")
+        report_path = os.path.join(output_dir, "cleaning_report.md")
         markdown_content = generate_cleaning_report_markdown(cleaning_report)
-
         with open(report_path, "w", encoding="utf-8") as f:
             f.write(markdown_content)
-
         updated_state["logs"].append(f"Generated cleaning report: {report_path}")
 
         # Mark cleaning as complete
-        updated_state["cleaning_complete"] = True
-        updated_state["logs"].append("Cleaning agent completed successfully")
+        updated_state["cleaning_complete"] = bool(updated_state["cleaned_data"] is not None and validation_metrics)
+        updated_state["logs"].append(f"Cleaning complete status: {updated_state['cleaning_complete']}")
+        if not updated_state["cleaning_complete"]:
+            raise ValueError("Cleaning failed: Either cleaned_data or validation_metrics is missing")
 
         # Clean up global variables
         for var in [
@@ -304,7 +312,6 @@ def run_cleaning_agent(state: AgentState) -> Dict[str, Any]:
         updated_state["cleaning_complete"] = False
 
     return updated_state
-
 
 def generate_cleaning_report_markdown(cleaning_report: Dict[str, Any]) -> str:
     """

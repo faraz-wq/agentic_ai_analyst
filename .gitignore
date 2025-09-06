@@ -5,3 +5,8 @@ venv/
 *.csv
 output/*.html
 output/*.csv
+output/*.json
+output/*.txt
+output/*.xlsx
+output/*.md
+output/*.pdf

@@ -145,9 +145,6 @@ def run_ingestion_agent(state: AgentState) -> Dict[str, Any]:
         # Execute the agent
         result = agent_executor.invoke(agent_input)
         
-        # Debug: Print the full result from the agent
-        print('AgentExecutor result:', result)
-        
         # Extract the agent's response
         agent_response = result.get('output', '')
         updated_state['logs'].append(f"Ingestion Agent Response: {agent_response}")
@@ -175,7 +172,7 @@ def run_ingestion_agent(state: AgentState) -> Dict[str, Any]:
             updated_state['raw_data'] = pd.read_csv(raw_data_path)
             updated_state['logs'].append(f"Loaded standardized DataFrame from {raw_data_path} with shape {updated_state['raw_data'].shape}")
             # Debug: Print DataFrame head
-            print("DataFrame head:\n", updated_state['raw_data'].head())
+            #print("DataFrame head:\n", updated_state['raw_data'].head())
         else:
             updated_state['logs'].append(f"Warning: Standardized data file {raw_data_path} not found")
         
