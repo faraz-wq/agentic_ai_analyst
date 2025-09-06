@@ -1,9 +1,14 @@
 """
 LangChain tool functions for the ingestion agent.
 """
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from scipy import stats
+from scipy.stats import pearsonr, chi2_contingency
+from typing import Dict, Optional
 import os
-import pandas as pd
-from typing import Dict, Any
+import pandas as pd 
 from langchain.tools import tool
 from ydata_profiling import ProfileReport
 import json
@@ -650,3 +655,146 @@ def save_cleaned_data(output_path: str) -> str:
     except Exception as e:
         return f"ERROR: Failed to save cleaned data: {str(e)}"
 
+@tool
+def perform_eda_summary(df_json: str) -> dict:
+    """
+    Generates comprehensive EDA summary statistics including descriptive stats, distributions, and missing values.
+    Input is a JSON string representing the DataFrame.
+    """
+    df = pd.read_json(df_json, orient='records')
+    summary = {
+        'descriptive_stats': df.describe().to_dict(),
+        'missing_values': df.isnull().sum().to_dict(),
+        'data_types': df.dtypes.to_dict(),
+        'shape': df.shape,
+        'unique_values_per_column': {col: df[col].nunique() for col in df.columns}
+    }
+    return summary
+
+@tool
+def analyze_correlations(df_json: str, method: str = 'pearson') -> dict:
+    """
+    Calculates correlation matrices and identifies strong relationships (abs > 0.5).
+    Input is a JSON string representing the DataFrame.
+    """
+    df = pd.read_json(df_json, orient='records')
+    numeric_df = df.select_dtypes(include=[np.number])
+    corr_matrix = numeric_df.corr(method=method)
+    strong_corrs = {}
+    for i in range(len(corr_matrix.columns)):
+        for j in range(i):
+            if abs(corr_matrix.iloc[i, j]) > 0.5:
+                strong_corrs[(corr_matrix.columns[i], corr_matrix.columns[j])] = corr_matrix.iloc[i, j]
+    return {
+        'correlation_matrix': corr_matrix.to_dict(),
+        'strong_correlations': strong_corrs
+    }
+
+@tool
+def identify_trends(df_json: str, date_column: str, value_column: str) -> dict:
+    """
+    Analyzes temporal trends and seasonality. Assumes date_column is datetime.
+    Input is a JSON string representing the DataFrame.
+    """
+    df = pd.read_json(df_json, orient='records')
+    df[date_column] = pd.to_datetime(df[date_column])
+    df = df.sort_values(date_column)
+    trend = {
+        'trend_slope': np.polyfit(range(len(df)), df[value_column], 1)[0],
+        'seasonality': df.set_index(date_column)[value_column].resample('M').mean().to_dict() if 'seasonal' in df.columns else None,
+        'overall_trend': 'increasing' if np.polyfit(range(len(df)), df[value_column], 1)[0] > 0 else 'decreasing'
+    }
+    return trend
+
+@tool
+def detect_imbalances(df_json: str, category_column: str) -> dict:
+    """
+    Identifies distribution imbalances and representation gaps in categorical data.
+    Input is a JSON string representing the DataFrame.
+    """
+    df = pd.read_json(df_json, orient='records')
+    value_counts = df[category_column].value_counts(normalize=True).to_dict()
+    total = sum(value_counts.values())
+    imbalances = {k: v for k, v in value_counts.items() if v < 0.05}  # Less than 5% as imbalance
+    gini = 1 - sum(v**2 for v in value_counts.values())  # Gini coefficient for inequality
+    return {
+        'proportions': value_counts,
+        'imbalances': imbalances,
+        'gini_coefficient': gini
+    }
+
+@tool
+def run_statistical_tests(df_json: str, group_column: str, value_column: str, test_type: str = 't-test') -> dict:
+    """
+    Performs hypothesis testing between groups (t-test, ANOVA, chi-square).
+    Input is a JSON string representing the DataFrame.
+    """
+    df = pd.read_json(df_json, orient='records')
+    groups = df[group_column].unique()
+    if test_type == 't-test' and len(groups) == 2:
+        group1 = df[df[group_column] == groups[0]][value_column]
+        group2 = df[df[group_column] == groups[1]][value_column]
+        t_stat, p_value = stats.ttest_ind(group1, group2)
+        return {'test_type': 't-test', 't_statistic': t_stat, 'p_value': p_value}
+    elif test_type == 'anova' and len(groups) > 1:
+        f_stat, p_value = stats.f_oneway(*[df[df[group_column] == g][value_column] for g in groups])
+        return {'test_type': 'ANOVA', 'f_statistic': f_stat, 'p_value': p_value}
+    elif test_type == 'chi-square':
+        contingency = pd.crosstab(df[group_column], pd.cut(df[value_column], bins=5))
+        chi2, p_value, dof, expected = chi2_contingency(contingency)
+        return {'test_type': 'chi-square', 'chi2_statistic': chi2, 'p_value': p_value}
+    else:
+        return {'error': 'Invalid test type or group count'}
+
+@tool
+def create_visualization(df_json: str, viz_type: str, x_column: str, y_column: str = None, output_path: str = None) -> str:
+    """
+    Generates various plot types and saves to output_path.
+    Input is a JSON string representing the DataFrame.
+    """
+    df = pd.read_json(df_json, orient='records')
+    plt.figure(figsize=(10, 6))
+    if viz_type == 'scatter' and y_column:
+        plt.scatter(df[x_column], df[y_column])
+        plt.xlabel(x_column)
+        plt.ylabel(y_column)
+    elif viz_type == 'bar' and y_column:
+        df.groupby(x_column)[y_column].mean().plot(kind='bar')
+        plt.xlabel(x_column)
+        plt.ylabel(y_column)
+    elif viz_type == 'line' and y_column:
+        df.plot(x=x_column, y=y_column, kind='line')
+    elif viz_type == 'histogram':
+        df[x_column].hist()
+        plt.xlabel(x_column)
+    elif viz_type == 'boxplot' and y_column:
+        df.boxplot(column=y_column, by=x_column)
+    else:
+        plt.close()
+        return "Invalid visualization type"
+    
+    if output_path:
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        plt.savefig(output_path)
+        plt.close()
+        return output_path
+    else:
+        plt.close()
+        return "Visualization generated but not saved (no path provided)"
+
+@tool
+def generate_insights_summary(analysis_results: dict, policy_context: str = "general") -> dict:
+    """
+    Synthesizes findings into actionable insights tailored to policy context.
+    """
+    insights = []
+    if 'strong_correlations' in analysis_results:
+        for corr_pair, value in analysis_results['strong_correlations'].items():
+            insights.append({
+                "title": f"Strong correlation between {corr_pair[0]} and {corr_pair[1]}",
+                "description": f"Correlation coefficient: {value}",
+                "confidence": "high" if abs(value) > 0.7 else "medium",
+                "implications": f"Policy implications in {policy_context} context",
+                "recommendations": ["Investigate causal links"]
+            })
+    return {"insights": insights}

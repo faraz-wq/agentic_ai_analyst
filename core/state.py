@@ -27,6 +27,11 @@ class AgentState(BaseModel):
     issues_detected: Optional[List[Dict[str, Any]]] = Field(default=None, description="List of identified data quality problems")
     actions_performed: Optional[List[Dict[str, Any]]] = Field(default=None, description="List of cleaning actions taken")
     
+    # Analysis results
+    insights: Optional[List[Dict]] = None
+    analysis_report: Optional[Dict] = None
+    visualizations_generated: Optional[List[str]] = None
+    
     # Workflow tracking
     logs: List[str] = Field(default_factory=list, description="Human-readable log messages")
     error: Optional[str] = Field(default=None, description="Error message if any step fails")
