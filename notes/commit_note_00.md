@@ -65,7 +65,7 @@ python ai_data_analytics_tool.py docs
 
 The tool creates the following output structure:
 
-```
+```txt
 output/
 ├── analysis_ready_data.csv
 ├── cleaned_transformed_data.csv
