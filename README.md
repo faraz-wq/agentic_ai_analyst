@@ -1,4 +1,4 @@
-# Data Analytics Pipeline CLI
+# Agentic AI Data Analytics Pipeline CLI
 
 A powerful command-line tool for automated data analytics that orchestrates a complete pipeline for CSV data processing, cleaning, and insights generation.
 
@@ -11,6 +11,9 @@ A powerful command-line tool for automated data analytics that orchestrates a co
 - **CLI Interface**: User-friendly command-line interface with progress bars
 - **Flexible Execution**: Skip steps, customize outputs, and control verbosity
 - **Rich Output**: Colored terminal output with emojis for better UX
+
+## 📺 Demo
+
 
 ## 📋 Pipeline Steps
 
