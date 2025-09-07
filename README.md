@@ -13,7 +13,7 @@ A powerful command-line tool for automated data analytics that orchestrates a co
 - **Rich Output**: Colored terminal output with emojis for better UX
 
 ## 📺 Demo
-[![Watch the video](https://img.youtube.com/vi/AeIIdRpMH8E/maxresdefault.jpg)](https://youtu.be/AeIIdRpMH8E)
+[![Watch the video](https://img.youtube.com/vi/udw_zYIo3Fk/maxresdefault.jpg)](https://youtu.be/udw_zYIo3Fk)
 
 ### [Demo Video](https://youtu.be/AeIIdRpMH8E)
 
