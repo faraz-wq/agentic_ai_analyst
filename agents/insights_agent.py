@@ -236,7 +236,7 @@ Wrap the final output in ```json\n...\n```.
     return {"error": "Max iterations reached without valid JSON output", "state": state}
 
 
-def generate_policy_report(state: AgentState) -> str:
+def generate_policy_report(state) -> str:
     """
     Generates the markdown policy insights report.
     """
@@ -261,7 +261,13 @@ def generate_policy_report(state: AgentState) -> str:
         md += f"**Implications:** {insight['implications']}\n\n"
         if "recommendations" in insight:
             md += "**Recommendations:**\n"
-            for rec in insight["recommendations"]:
+            # Ensure recommendations is a list; convert string to list if necessary
+            recommendations = insight["recommendations"]
+            if isinstance(recommendations, str):
+                recommendations = [recommendations]
+            elif not isinstance(recommendations, list):
+                recommendations = []
+            for rec in recommendations:
                 md += f"- {rec}\n"
         md += "\n"
 
@@ -279,9 +285,15 @@ def generate_policy_report(state: AgentState) -> str:
     if state.insights:
         recommendations = set()
         for insight in state.insights:
-            recommendations.update(insight.get("recommendations", []))
+            # Ensure recommendations is a list; convert string to list if necessary
+            recs = insight.get("recommendations", [])
+            if isinstance(recs, str):
+                recs = [recs]
+            elif not isinstance(recs, list):
+                recs = []
+            recommendations.update(recs)
         if recommendations:
-            for rec in recommendations:
+            for rec in sorted(recommendations):  # Sort for consistent output
                 md += f"- {rec}\n"
         else:
             md += "No specific recommendations generated.\n"
