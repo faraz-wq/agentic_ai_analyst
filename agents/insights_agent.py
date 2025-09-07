@@ -27,9 +27,9 @@ def create_insights_agent() -> ChatOpenAI:
     Returns the raw LLM for custom agent logic.
     """
     llm = ChatOpenAI(
-        base_url="https://api.cerebras.ai/v1",
-        api_key=os.getenv("OPENROUTER_API_KEY"),
-        model="qwen-3-235b-a22b-instruct-2507",
+        base_url=os.getenv("BASE_URL"),
+        api_key=os.getenv("API_KEY"),
+        model=os.getenv("MODEL"),
         temperature=0.1,
         max_tokens=2000,
     )

@@ -38,10 +38,10 @@ def create_cleaning_agent() -> AgentExecutor:
 
     # Initialize the LLM
     llm = ChatOpenAI(
-        base_url="https://api.cerebras.ai/v1",
-        api_key=os.getenv("OPENROUTER_API_KEY"),
-        model="qwen-3-235b-a22b-instruct-2507",
-        temperature=0.1,  # Low temperature for consistent, factual responses
+        base_url=os.getenv("BASE_URL"),
+        api_key=os.getenv("API_KEY"),
+        model=os.getenv("MODEL"),
+        temperature=0.1,
         max_tokens=2000,
     )
 
