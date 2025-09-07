@@ -15,7 +15,7 @@ A powerful command-line tool for automated data analytics that orchestrates a co
 ## 📺 Demo
 [![Watch the video](https://img.youtube.com/vi/udw_zYIo3Fk/maxresdefault.jpg)](https://youtu.be/udw_zYIo3Fk)
 
-### [Demo Video](https://youtu.be/AeIIdRpMH8E)
+### [Demo Video for TechBharat.in Click Image to watch](https://youtu.be/AeIIdRpMH8E)
 
 ## 📋 Pipeline Steps
 
