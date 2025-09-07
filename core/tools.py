@@ -207,7 +207,6 @@ def save_standardized_data(output_path: str) -> str:
         # Save to CSV
         df.to_csv(output_path, index=False)
         
-        print(globals()['_loaded_dataframe'].head())
         return f"SUCCESS: Saved standardized data to {output_path}"
         
     except Exception as e:

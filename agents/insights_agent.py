@@ -127,9 +127,6 @@ Wrap the final output in ```json\n...\n```.
             content = (
                 response.content if hasattr(response, "content") else str(response)
             )
-            print(
-                f"Iteration {iteration + 1}: LLM response: {content}"
-            )  # Debug logging
 
             # Check for tool calls in the response
             tool_call_pattern = r"\[(.*?)\]\((.*?)\)"
