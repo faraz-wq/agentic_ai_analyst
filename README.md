@@ -300,17 +300,6 @@ openpyxl>=3.0.0         # For Excel file support
 xlrd>=2.0.0             # For legacy Excel support
 ```
 
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 📞 Support
-
-- **Documentation**: Check this README and inline help (`--help`)
-- **Issues**: Report bugs via GitHub Issues
-- **Email**: <support@yourorganization.com>
-- **FAQ**: Check the [Wiki](link-to-wiki) for frequently asked questions
-
 ## 🏗️ Architecture
 
 ```mermaid
